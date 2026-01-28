@@ -37,23 +37,23 @@ class iNat21MiniDataset(Dataset):
         self.img_path = []
         
         self.species_label_list = []
-        self.family_label_list = []
         self.order_label_list = []
+        self.class_label_list = []
 
         if is_train:
-            filename = 'data/inat21_mini_train.txt'
+            filename = os.path.join(root, 'data', 'inat21_mini_train.txt')
         else:
-            filename = 'data/inat21_mini_val.txt'
+            filename = os.path.join(root, 'data', 'inat21_mini_val.txt')
 
         with open(filename) as f:
             for line in f:
-                self.img_path.append(os.path.join(root, line.split()[0]))
+                self.img_path.append(os.path.join(root, 'data', 'images', line.split()[0]))
                 id = int(line.split()[1])
-                family_id = int(line.split()[2])
-                order_id = int(line.split()[3])
+                order_id = int(line.split()[2])
+                class_id = int(line.split()[3])
                 self.species_label_list.append(id)
-                self.family_label_list.append(family_id)
                 self.order_label_list.append(order_id)
+                self.class_label_list.append(class_id)
 
 
         self.targets = self.species_label_list  # Sampler needs to use targets
@@ -124,12 +124,12 @@ class iNat21MiniDataset(Dataset):
 
         if self.is_hier:
             if self.path_yn:
-                return sample, segments, self.species_label_list[index], self.family_label_list[index], self.order_label_list[index], path
-            return sample, segments, self.species_label_list[index], self.family_label_list[index], self.order_label_list[index]
+                return sample, segments, self.species_label_list[index], self.order_label_list[index], self.class_label_list[index], path
+            return sample, segments, self.species_label_list[index], self.order_label_list[index], self.class_label_list[index]
         else:
             if self.category == 'name':
                 return sample, segments, self.species_label_list[index]    
-            elif self.category == 'family':
-                return sample, segments, self.family_label_list[index]
             elif self.category == 'order':
                 return sample, segments, self.order_label_list[index]
+            elif self.category == 'class':
+                return sample, segments, self.class_label_list[index]

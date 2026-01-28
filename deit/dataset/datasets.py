@@ -103,7 +103,7 @@ def build_dataset(is_train, args):
             is_hier=True,
             is_train=is_train,
         )
-        nb_classes = [10000, 1103, 273]
+        nb_classes = [2215, 55, 4]
 
     elif args.data_set == 'INAT21-MINI-HIER-SUPERPIXEL':
         dataset = inat21_mini_seeds.iNat21MiniDataset(
@@ -118,7 +118,7 @@ def build_dataset(is_train, args):
             blur_ops=None,
             scale_factor=1.0,
         )
-        nb_classes = [10000, 1103, 273]
+        nb_classes = [2215, 55, 4]
 
 
     
