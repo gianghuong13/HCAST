@@ -112,7 +112,7 @@ class ImageFolder(datasets.ImageFolder):
             segments = torch.LongTensor(segments)
 
         if self.is_hier:
-            return sample, segments, target, family_target, order_target
+            return sample, segments, target, family_target, order_target, path
     
         else:
             if self.category == 'name':

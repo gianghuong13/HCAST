@@ -20,6 +20,9 @@ from birds_get_tree_target_2 import *
 import json
 import torch.nn.functional as F
 
+from pathlib import Path
+
+
 @torch.no_grad()
 def evaluate_detail(data_loader, model, device, filename, nb_classes, dataset='AIR-SUPERPIXEL', breeds_sort=None):
     criterion = torch.nn.CrossEntropyLoss()
@@ -36,15 +39,22 @@ def evaluate_detail(data_loader, model, device, filename, nb_classes, dataset='A
     # switch to evaluation mode
     model.eval()
     results = []
+
+    error_dir = Path(filename).parent / "error_images"
+    error_dir.mkdir(parents=True, exist_ok=True)
+
     
     tice_cnt = 0
     fpa_cnt = 0
     total_cnt = 0
     cum = 0
     
+    max_errors = 200
+    err_cnt = 0
+    
     if len(nb_classes) == 3:
-        results.append(['m_gt', 'm_pred', 'f_gt', 'f_pred', 's_gt', 's_pred'])
-        for images, segments, target, family_targets, mf_targets in metric_logger.log_every(data_loader, 1, header):
+        results.append(['img_path', 'm_gt', 'm_pred', 'f_gt', 'f_pred', 's_gt', 's_pred'])
+        for images, segments, target, family_targets, mf_targets, paths in metric_logger.log_every(data_loader, 1, header):
             images = images.to(device, non_blocking=True)
             segments = segments.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
@@ -85,9 +95,32 @@ def evaluate_detail(data_loader, model, device, filename, nb_classes, dataset='A
 
             total_cnt += batch_size
             for i in range(batch_size):
-                results.append([mf_targets[i], manu_pred[i], family_targets[i], family_pred[i], target[i], pred[i]])
+                results.append([paths[i], mf_targets[i], manu_pred[i], family_targets[i], family_pred[i], target[i], pred[i]])
                 if pred[i] == target[i] and family_pred[i] == family_targets[i] and manu_pred[i] == mf_targets[i]:
                     fpa_cnt += 1
+
+                # ---- SAVE MISCLASSIFIED IMAGES ----
+                if pred[i] != target[i] and err_cnt < max_errors:
+                    src = paths[i]
+
+                    if family_pred[i] == family_targets[i]:
+                        err_type = "same_family"
+                    else:
+                        err_type = "wrong_family"
+
+                    fname = (
+                        f"{err_type}"
+                        f"_s_gt{int(target[i])}_pred{int(pred[i])}"
+                        f"_fgt{int(family_targets[i])}_fpred{int(family_pred[i])}"
+                        f"_mgt{int(mf_targets[i])}_mpred{int(manu_pred[i])}"
+                        f"_{Path(src).name}"
+                    )
+
+                    dst = error_dir / fname
+                    if not dst.exists():
+                        shutil.copy(src, dst)
+                        err_cnt += 1
+
 
                 if 'AIR' in dataset:
                     tice_results = [pred[i]+1, family_pred[i]+1, manu_pred[i]+1]
