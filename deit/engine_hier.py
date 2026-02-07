@@ -34,7 +34,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         criterion = torch.nn.BCEWithLogitsLoss()
     
     if len(args.nb_classes) == 3:
-        for samples, segments, targets, family_targets, mf_targets in metric_logger.log_every(data_loader, print_freq, header):
+        for samples, segments, targets, family_targets, mf_targets, *extras in metric_logger.log_every(data_loader, print_freq, header):
             samples = samples.to(device, non_blocking=True)
             segments = segments.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
@@ -103,7 +103,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
     
     elif len(args.nb_classes) == 2:
-        for samples, segments, targets, family_targets in metric_logger.log_every(data_loader, print_freq, header):
+        for samples, segments, targets, family_targets, *extras in metric_logger.log_every(data_loader, print_freq, header):
             samples = samples.to(device, non_blocking=True)
             segments = segments.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
@@ -183,7 +183,7 @@ def evaluate(data_loader, model, device, nb_classes):
     model.eval()
 
     if len(nb_classes) == 3:
-        for images, segments, target, family_targets, mf_targets in metric_logger.log_every(data_loader, 10, header):
+        for images, segments, target, family_targets, mf_targets, *extras in metric_logger.log_every(data_loader, 10, header):
             images = images.to(device, non_blocking=True)
             segments = segments.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
@@ -217,7 +217,7 @@ def evaluate(data_loader, model, device, nb_classes):
                     familytop1=metric_logger.family_acc1, manutop1=metric_logger.manu_acc1))
     
     elif len(nb_classes) == 2:
-        for images, segments, target, family_targets in metric_logger.log_every(data_loader, 10, header):
+        for images, segments, target, family_targets, *extras in metric_logger.log_every(data_loader, 10, header):
             images = images.to(device, non_blocking=True)
             segments = segments.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
