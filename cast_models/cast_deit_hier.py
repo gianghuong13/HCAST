@@ -200,18 +200,23 @@ class CAST(VisionTransformer):
 
         return intermediates
 
-    def forward(self, x, y):
+    def forward(self, x, y, return_intermediates=False):
         intermediates = self.forward_features(x, y)  
         if self.num_manufacturer:
             manu_out = self.manufacturer_head(intermediates['out4']) 
             family_out = self.family_head(intermediates['out3'])
             out = self.head(intermediates['out2']) 
+
+            if return_intermediates:
+                return out, family_out, manu_out, intermediates
             return out, family_out, manu_out
     
         else:
             family_out = self.family_head(intermediates['out4'])
             out = self.head(intermediates['out3']) 
 
+            if return_intermediates:
+                return out, family_out, intermediates
             return out, family_out
 
 
