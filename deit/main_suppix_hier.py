@@ -201,6 +201,10 @@ def get_args_parser():
     parser.add_argument('--random_seed', default=1, type=int)
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training')
 
+
+    parser.add_argument('--visualize', action='store_true', help='Run visualization mode')
+    parser.add_argument('--vis_img_path', type=str, default='', help='Path to image to visualize')
+
     return parser
 
 
@@ -450,6 +454,35 @@ def main(args):
         test_stats = evaluate_detail(data_loader_val, model, device, os.path.join(args.output_dir, args.filename), 
                                      args.nb_classes, args.data_set, args.breeds_sort)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+        return
+    if args.visualize:
+            
+        print(f"Đang tìm kiếm ảnh: {args.vis_img_path} trong tập dữ liệu...")
+        
+        target_path = args.vis_img_path
+        found = False
+        
+        for idx in range(len(dataset_val)):
+            sample_data = dataset_val[idx]
+            
+            # sample_data có dạng: (image, segment, target, family_target, ..., path)
+            current_path = str(sample_data[-1]) 
+            
+            if target_path in current_path or current_path in target_path:
+                print(f"Đã tìm thấy ảnh tại Index: {idx}")
+                
+                images_tensor = sample_data[0]
+                segments_tensor = sample_data[1]
+                
+                from visualize import visualize_cast_pooling
+                visualize_cast_pooling(model, images_tensor, segments_tensor, device)
+                
+                found = True
+                break
+                
+        if not found:
+            print(f"Không tìm thấy ảnh nào khớp với đường dẫn: {target_path}")
+            
         return
 
     print(f"Start training for {args.epochs} epochs")
