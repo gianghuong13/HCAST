@@ -3,7 +3,6 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
-from skimage.segmentation import find_boundaries
 
 def unnormalize(tensor):
     """Khôi phục tensor ảnh đã normalize"""
@@ -18,6 +17,16 @@ def generate_random_colors(num_colors):
     np.random.seed(42)
     colors = np.random.rand(num_colors, 3)
     return colors
+
+def get_boundaries_numpy(label_img):
+    # pad ảnh để xử lý các pixel ở viền
+    padded = np.pad(label_img, pad_width=1, mode='edge')
+    # So sánh từng pixel với 4 hàng xóm xung quanh, nếu khác -> boundary
+    boundaries = (label_img != padded[:-2, 1:-1]) | \
+                 (label_img != padded[2:, 1:-1]) | \
+                 (label_img != padded[1:-1, :-2]) | \
+                 (label_img != padded[1:-1, 2:])
+    return boundaries
 
 def create_segmentation_map(superpixel_mask, patch_cluster_ids, colors):
     """
@@ -46,7 +55,7 @@ def create_segmentation_map(superpixel_mask, patch_cluster_ids, colors):
         cluster_map_2d[pixel_indices] = cluster_id
         
     # Vẽ đường viền trắng 
-    boundaries = find_boundaries(cluster_map_2d, mode='thick')
+    boundaries = get_boundaries_numpy(cluster_map_2d)
     colored_map[boundaries] = [1.0, 1.0, 1.0] # Màu trắng
     
     return colored_map
