@@ -128,7 +128,8 @@ def visualize_cast_pooling(model, image_tensor, segment_tensor, device, img_inde
     plt.title("Level 3 (Coarse Segments)")
     
     plt.tight_layout()
-    plt.show()
-    # Nếu chạy hàng loạt, comment dòng plt.show() và dùng 2 dòng dưới:
-    # plt.savefig(f"vis_hierarchy_{img_index}.png", bbox_inches='tight', dpi=150)
-    # plt.close()
+    # plt.show()
+    save_filename = "visualize_result.png"
+    plt.savefig(save_filename, bbox_inches='tight', dpi=150)
+    print(f"Ảnh đã được lưu tại: {save_filename}")
+    plt.close()
