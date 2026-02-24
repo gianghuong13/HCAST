@@ -432,7 +432,8 @@ def main(args):
         if 'accuracy' in checkpoint:
             print('Checkpoint Accuracy:', checkpoint['accuracy'])
         
-        test_stats = evaluate(data_loader_val, model, device)
+        from engine import evaluate_flat_detail
+        test_stats = evaluate_flat_detail(data_loader_val, model, device, os.path.join(args.output_dir, args.filename))
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         return
 
@@ -503,7 +504,7 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-
+    test_stats = evaluate_flat_detail(data_loader_val, model, device, os.path.join(args.output_dir, args.filename))
 
 
 if __name__ == '__main__':

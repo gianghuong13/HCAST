@@ -433,7 +433,7 @@ def main(args):
         if 'accuracy' in checkpoint:
             print('Checkpoint Accuracy:', checkpoint['accuracy'])
         
-        test_stats = evaluate_detail(data_loader_val, model, device, args.filename, len(args.nb_classes), args.data_set, args.breeds_sort)
+        test_stats = evaluate_detail(data_loader_val, model, device, os.path.join(args.output_dir, args.filename), len(args.nb_classes), args.data_set, args.breeds_sort)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         return
 
