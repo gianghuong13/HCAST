@@ -54,6 +54,18 @@ def build_dataset(is_train, args):
         )
         nb_classes = [100, 70, 30]
 
+    elif args.data_set == 'BIRD':
+        root = os.path.join(args.data_path, 'train' if is_train else 'test')
+        dataset = birds.ImageFolder(
+            root,
+            transform=transform,
+            is_hier=False,
+            category='name',
+            random_seed=args.random_seed,
+            train=is_train,
+        )
+        nb_classes = [200]
+
     elif args.data_set == 'BIRD-HIER':
         root = os.path.join(args.data_path, 'train' if is_train else 'test')
         dataset = birds.ImageFolder(
