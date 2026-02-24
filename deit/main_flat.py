@@ -21,7 +21,7 @@ from timm.utils import NativeScaler, get_state_dict, ModelEma
 
 from dataset.datasets_custom import build_dataset
 
-from engine import train_one_epoch, evaluate
+from engine import train_one_epoch, evaluate, evaluate_flat_detail
 from losses import DistillationLoss
 from samplers import RASampler
 from augment import new_data_aug_generator
@@ -432,7 +432,6 @@ def main(args):
         if 'accuracy' in checkpoint:
             print('Checkpoint Accuracy:', checkpoint['accuracy'])
         
-        from engine import evaluate_flat_detail
         test_stats = evaluate_flat_detail(data_loader_val, model, device, os.path.join(args.output_dir, args.filename))
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         return
