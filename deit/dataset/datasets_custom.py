@@ -60,11 +60,11 @@ def build_dataset(is_train, args):
             root,
             transform=transform,
             is_hier=False,
-            category='name',
+            category='family',
             random_seed=args.random_seed,
             train=is_train,
         )
-        nb_classes = [200]
+        nb_classes = [38]
 
     elif args.data_set == 'BIRD-HIER':
         root = os.path.join(args.data_path, 'train' if is_train else 'test')
