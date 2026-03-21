@@ -45,33 +45,57 @@ def unnormalize_image(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.2
     return np.uint8(img * 255)
 
 def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, original_img, save_path):
-    captured_data = {}
+    captured_data = {'L2': [], 'L3': [], 'L4': []}
+    
     def get_attn_hook(name):
-        return lambda module, input, output: captured_data.update({name: output.detach()})
+        return lambda module, input, output: captured_data[name].append(output.detach())
 
-    # 1. Gắn hook để lấy attention weights
-    h2 = hcast_model.blocks2[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L2'))
-    h3 = hcast_model.blocks3[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L3'))
-    h4 = hcast_model.blocks4[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L4'))
+    # 1. Gắn hook vào TẤT CẢ các layer trong block thay vì chỉ lấy layer cuối [-1]
+    for blk in hcast_model.blocks2: blk.attn.attn_drop.register_forward_hook(get_attn_hook('L2'))
+    for blk in hcast_model.blocks3: blk.attn.attn_drop.register_forward_hook(get_attn_hook('L3'))
+    for blk in hcast_model.blocks4: blk.attn.attn_drop.register_forward_hook(get_attn_hook('L4'))
 
     with torch.no_grad():
         intermediates = hcast_model.forward_features(image_tensor, y_mask_tensor)
         
-        # --- FIX LỖI INDEX: TÌM RA CÁC ID CÒN SỐNG SÓT ---
-        # Mô phỏng lại quá trình downsample mask y bên trong model
+        # Mô phỏng downsample để lấy các ID còn tồn tại
         x_dummy = hcast_model.patch_embed(image_tensor)
-        y_downsampled = y_mask_tensor.unsqueeze(1).float()
-        y_downsampled = F.interpolate(y_downsampled, x_dummy.shape[1:3], mode='nearest').squeeze(1).long()
-        
-        # Lấy danh sách ID thực sự được model gom thành token (giữ nguyên thứ tự)
+        y_downsampled = F.interpolate(y_mask_tensor.unsqueeze(1).float(), x_dummy.shape[1:3], mode='nearest').squeeze(1).long()
         surviving_ids = torch.unique(y_downsampled).cpu().numpy()
 
-    h2.remove(); h3.remove(); h4.remove()
+        print(">>> KIỂM TRA LOGIT 1:")
+        print("Max:", intermediates['logit1'].max().item())
+        print("Min:", intermediates['logit1'].min().item())
 
-    # Giữ nguyên hàm mean() theo đúng paper
-    def get_cls_attn(raw_attn): return raw_attn[0].mean(dim=0)[0, 1:]
-    attn_L2, attn_L3, attn_L4 = map(get_cls_attn, [captured_data['L2'], captured_data['L3'], captured_data['L4']])
+    # --- THUẬT TOÁN ATTENTION ROLLOUT ---
+    def get_rollout_attn(raw_attns):
+        # Lấy kích thước ma trận (N x N)
+        N = raw_attns[0].shape[-1]
+        R = torch.eye(N).to(raw_attns[0].device) # Khởi tạo ma trận Identity
+        
+        for a in raw_attns:
+            # Trung bình qua các heads: a[0] có shape (num_heads, N, N)
+            a_mean = a[0].mean(dim=0) 
+            
+            # Rollout formula: 0.5 * Attention + 0.5 * Identity (bù trừ cho Residual Connection)
+            a_mean = 0.5 * a_mean + 0.5 * torch.eye(N).to(a_mean.device)
+            
+            # Nhân tích lũy
+            R = torch.matmul(a_mean, R)
+            
+        # Trả về hàng 0 (của CLS token), bỏ cột 0 (chỉ lấy spatial tokens)
+        return R[0, 1:]
 
+    # Lấy attention đã qua Rollout thay vì chỉ layer cuối
+    attn_L2 = get_rollout_attn(captured_data['L2'])
+    attn_L3 = get_rollout_attn(captured_data['L3'])
+    attn_L4 = get_rollout_attn(captured_data['L4'])
+
+    # ------------------------------------
+
+    # LƯU Ý CHECKPOINT: Kiểm tra xem logit đã được model softmax chưa
+    # Nếu logit1 đã là xác suất (nằm trong khoảng 0-1), việc dùng F.softmax lần nữa sẽ làm phẳng
+    # mọi trọng số thành nhiễu ngẫu nhiên. Nếu bạn in logit1 ra mà thấy > 1 hoặc < 0 thì code dưới đây giữ nguyên.
     a_1to2 = F.softmax(intermediates['logit1'], dim=-1)[0]
     a_2to3 = F.softmax(intermediates['logit2'], dim=-1)[0]
     a_3to4 = F.softmax(intermediates['logit3'], dim=-1)[0]
@@ -86,27 +110,17 @@ def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, or
     def create_overlay(weights):
         heatmap = np.zeros_like(y_mask, dtype=np.float32)
         
-        # Gắn đúng trọng số vào ID còn sống sót
         for i, seg_id in enumerate(surviving_ids):
             if i < len(weights): 
                 heatmap[y_mask == seg_id] = float(weights[i])
                 
-        # Chuẩn hóa về [0, 1]
         heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
-        
-        # Làm mờ ảnh gốc
         faded_img = cv2.addWeighted(original_img, 0.4, np.full_like(original_img, 255), 0.6, 0)
-        
-        # Tạo lớp màu đỏ sẫm
         red_mask = np.zeros_like(original_img, dtype=np.uint8)
-        red_mask[:] = [139, 0, 0] # Bạn có thể thay đổi mã màu đỏ ở đây nếu muốn
-        
-        # Trộn màu: Vùng có heatmap cao sẽ kéo về màu đỏ sẫm, vùng thấp giữ nguyên ảnh mờ
+        red_mask[:] = [139, 0, 0] 
         heatmap_expanded = np.expand_dims(heatmap, axis=-1)
         blended = (heatmap_expanded * red_mask + (1 - heatmap_expanded) * faded_img).astype(np.uint8)
-        
-        final_out = cv2.addWeighted(original_img, 0.5, blended, 0.5, 0)
-        return final_out
+        return cv2.addWeighted(original_img, 0.5, blended, 0.5, 0)
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
     axes[0].imshow(original_img); axes[0].set_title("Image", fontsize=14); axes[0].axis('off')
