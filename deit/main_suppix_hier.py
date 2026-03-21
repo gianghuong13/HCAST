@@ -75,8 +75,11 @@ def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, or
 
     def create_overlay(weights):
         heatmap = np.zeros_like(y_mask, dtype=np.float32)
-        for idx, seg_id in enumerate(unique_segs):
-            if seg_id < len(weights): heatmap[y_mask == seg_id] = weights[idx]
+        for seg_id in unique_segs:
+            # Dùng trực tiếp int(seg_id) để trỏ đúng vào trọng số của mảnh ghép 
+            if int(seg_id) < len(weights): 
+                heatmap[y_mask == seg_id] = float(weights[int(seg_id)])
+                
         heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
         color_map = cv2.cvtColor(cv2.applyColorMap(np.uint8(255 * heatmap), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
         return cv2.addWeighted(original_img, 0.5, color_map, 0.5, 0)
