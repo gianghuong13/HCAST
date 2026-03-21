@@ -49,6 +49,7 @@ def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, or
     def get_attn_hook(name):
         return lambda module, input, output: captured_data.update({name: output.detach()})
 
+    # 1. Gắn hook để lấy attention weights
     h2 = hcast_model.blocks2[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L2'))
     h3 = hcast_model.blocks3[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L3'))
     h4 = hcast_model.blocks4[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L4'))
@@ -56,8 +57,18 @@ def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, or
     with torch.no_grad():
         intermediates = hcast_model.forward_features(image_tensor, y_mask_tensor)
         
+        # --- FIX LỖI INDEX: TÌM RA CÁC ID CÒN SỐNG SÓT ---
+        # Mô phỏng lại quá trình downsample mask y bên trong model
+        x_dummy = hcast_model.patch_embed(image_tensor)
+        y_downsampled = y_mask_tensor.unsqueeze(1).float()
+        y_downsampled = F.interpolate(y_downsampled, x_dummy.shape[1:3], mode='nearest').squeeze(1).long()
+        
+        # Lấy danh sách ID thực sự được model gom thành token (giữ nguyên thứ tự)
+        surviving_ids = torch.unique(y_downsampled).cpu().numpy()
+
     h2.remove(); h3.remove(); h4.remove()
 
+    # Giữ nguyên hàm mean() theo đúng paper
     def get_cls_attn(raw_attn): return raw_attn[0].mean(dim=0)[0, 1:]
     attn_L2, attn_L3, attn_L4 = map(get_cls_attn, [captured_data['L2'], captured_data['L3'], captured_data['L4']])
 
@@ -71,24 +82,37 @@ def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, or
     w_L2, w_L3, w_L4 = [torch.matmul(m, a).cpu().numpy() for m, a in zip([a_1to2, a_1to3, a_1to4], [attn_L2, attn_L3, attn_L4])]
 
     y_mask = y_mask_tensor[0].cpu().numpy()
-    unique_segs = np.unique(y_mask)
 
     def create_overlay(weights):
         heatmap = np.zeros_like(y_mask, dtype=np.float32)
-        for seg_id in unique_segs:
-            # Dùng trực tiếp int(seg_id) để trỏ đúng vào trọng số của mảnh ghép 
-            if int(seg_id) < len(weights): 
-                heatmap[y_mask == seg_id] = float(weights[int(seg_id)])
+        
+        # Gắn đúng trọng số vào ID còn sống sót
+        for i, seg_id in enumerate(surviving_ids):
+            if i < len(weights): 
+                heatmap[y_mask == seg_id] = float(weights[i])
                 
+        # Chuẩn hóa về [0, 1]
         heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
-        color_map = cv2.cvtColor(cv2.applyColorMap(np.uint8(255 * heatmap), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
-        return cv2.addWeighted(original_img, 0.5, color_map, 0.5, 0)
+        
+        # Làm mờ ảnh gốc
+        faded_img = cv2.addWeighted(original_img, 0.4, np.full_like(original_img, 255), 0.6, 0)
+        
+        # Tạo lớp màu đỏ sẫm
+        red_mask = np.zeros_like(original_img, dtype=np.uint8)
+        red_mask[:] = [139, 0, 0] # Bạn có thể thay đổi mã màu đỏ ở đây nếu muốn
+        
+        # Trộn màu: Vùng có heatmap cao sẽ kéo về màu đỏ sẫm, vùng thấp giữ nguyên ảnh mờ
+        heatmap_expanded = np.expand_dims(heatmap, axis=-1)
+        blended = (heatmap_expanded * red_mask + (1 - heatmap_expanded) * faded_img).astype(np.uint8)
+        
+        final_out = cv2.addWeighted(original_img, 0.5, blended, 0.5, 0)
+        return final_out
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
-    axes[0].imshow(original_img); axes[0].set_title("Input", fontweight='bold'); axes[0].axis('off')
-    titles = ["Level 2 (Localized)", "Level 3 (Expanding)", "Level 4 (Holistic)"]
+    axes[0].imshow(original_img); axes[0].set_title("Image", fontsize=14); axes[0].axis('off')
+    titles = ["Level 2", "Level 3", "Level 4"]
     for i, (w, title) in enumerate(zip([w_L2, w_L3, w_L4], titles)):
-        axes[i+1].imshow(create_overlay(w)); axes[i+1].set_title(title, fontweight='bold'); axes[i+1].axis('off')
+        axes[i+1].imshow(create_overlay(w)); axes[i+1].set_title(title, fontsize=14); axes[i+1].axis('off')
     
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches='tight', dpi=150)
