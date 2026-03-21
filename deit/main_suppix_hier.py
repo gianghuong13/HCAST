@@ -31,6 +31,66 @@ import cast_models.cast_deit_hier
 
 import utils
 
+import os
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import torch.nn.functional as F
+
+def unnormalize_image(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    img = tensor.clone().cpu().numpy()
+    img = np.transpose(img, (1, 2, 0))
+    img = img * np.array(std) + np.array(mean)
+    img = np.clip(img, 0, 1)
+    return np.uint8(img * 255)
+
+def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, original_img, save_path):
+    captured_data = {}
+    def get_attn_hook(name):
+        return lambda module, input, output: captured_data.update({name: output.detach()})
+
+    h2 = hcast_model.blocks2[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L2'))
+    h3 = hcast_model.blocks3[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L3'))
+    h4 = hcast_model.blocks4[-1].attn.attn_drop.register_forward_hook(get_attn_hook('L4'))
+
+    with torch.no_grad():
+        intermediates = hcast_model.forward_features(image_tensor, y_mask_tensor)
+        
+    h2.remove(); h3.remove(); h4.remove()
+
+    def get_cls_attn(raw_attn): return raw_attn[0].mean(dim=0)[0, 1:]
+    attn_L2, attn_L3, attn_L4 = map(get_cls_attn, [captured_data['L2'], captured_data['L3'], captured_data['L4']])
+
+    a_1to2 = F.softmax(intermediates['logit1'], dim=-1)[0]
+    a_2to3 = F.softmax(intermediates['logit2'], dim=-1)[0]
+    a_3to4 = F.softmax(intermediates['logit3'], dim=-1)[0]
+
+    a_1to3 = torch.matmul(a_1to2, a_2to3)
+    a_1to4 = torch.matmul(a_1to3, a_3to4)
+
+    w_L2, w_L3, w_L4 = [torch.matmul(m, a).cpu().numpy() for m, a in zip([a_1to2, a_1to3, a_1to4], [attn_L2, attn_L3, attn_L4])]
+
+    y_mask = y_mask_tensor[0].cpu().numpy()
+    unique_segs = np.unique(y_mask)
+
+    def create_overlay(weights):
+        heatmap = np.zeros_like(y_mask, dtype=np.float32)
+        for idx, seg_id in enumerate(unique_segs):
+            if seg_id < len(weights): heatmap[y_mask == seg_id] = weights[idx]
+        heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
+        color_map = cv2.cvtColor(cv2.applyColorMap(np.uint8(255 * heatmap), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
+        return cv2.addWeighted(original_img, 0.5, color_map, 0.5, 0)
+
+    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    axes[0].imshow(original_img); axes[0].set_title("Input", fontweight='bold'); axes[0].axis('off')
+    titles = ["Level 2 (Localized)", "Level 3 (Expanding)", "Level 4 (Holistic)"]
+    for i, (w, title) in enumerate(zip([w_L2, w_L3, w_L4], titles)):
+        axes[i+1].imshow(create_overlay(w)); axes[i+1].set_title(title, fontweight='bold'); axes[i+1].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight', dpi=150)
+    plt.close(fig)
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
@@ -200,7 +260,8 @@ def get_args_parser():
     parser.add_argument('--breeds_sort', default='entity13', type=str, choices=['entity13', 'living17', 'nonliving26', 'entity30'])
     parser.add_argument('--random_seed', default=1, type=int)
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training')
-
+    parser.add_argument('--visualize', action='store_true', help='Export attention maps after evaluation')
+    parser.add_argument('--vis-name', type=str, default='', help='Tên file ảnh cụ thể muốn vẽ (VD: Loggerhead_Shrike_001.jpg)')
     return parser
 
 
@@ -447,10 +508,71 @@ def main(args):
     if args.eval:
         if 'accuracy' in checkpoint:
             print('Checkpoint Accuracy:', checkpoint['accuracy'])
+            
+        # 1. CHẠY EVALUATE ĐỂ TÍNH ACCURACY NHƯ CŨ
         test_stats = evaluate_detail(data_loader_val, model, device, os.path.join(args.output_dir, args.filename), 
                                      args.nb_classes, args.data_set, args.breeds_sort)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        return
+        
+        # 2. KHỐI VẼ HÌNH 
+        if args.visualize:
+            print("\n=> Starting Visualization phase...")
+            os.makedirs('vis_results_baseline', exist_ok=True)
+            model.eval()
+            
+            # TRƯỜNG HỢP 1: TÌM ẢNH CỤ THỂ
+            if args.vis_name != '':
+                print(f"Searching for image containing: '{args.vis_name}' in the test set...")
+                found = False
+                
+                # Duyệt qua danh sách file trong dataset_val (Thường nằm trong thuộc tính samples hoặc imgs)
+                # Tùy thuộc cấu trúc dataset của bạn, nó có thể là dataset_val.samples hoặc dataset_val.dataset.samples
+                samples_list = getattr(dataset_val, 'samples', None) 
+                if samples_list is None and hasattr(dataset_val, 'dataset'):
+                    samples_list = getattr(dataset_val.dataset, 'samples', None)
+                
+                if samples_list is not None:
+                    for idx, (img_path, target_label) in enumerate(samples_list):
+                        if args.vis_name in img_path:
+                            print(f"Found match: {img_path}")
+                            
+                            # Rút đúng dữ liệu của ảnh này ra (gồm ảnh đã transform, mask, nhãn...)
+                            data_tuple = dataset_val[idx] 
+                            
+                            # Ép kiểu thành Batch có kích thước 1 (unsqueeze) để đưa vào model
+                            single_img_tensor = data_tuple[0].unsqueeze(0).to(device)
+                            single_mask_tensor = data_tuple[1].unsqueeze(0).to(device)
+                            
+                            original_img = unnormalize_image(single_img_tensor[0])
+                            
+                            # Tên file lưu sẽ có luôn tên gốc của ảnh cho dễ quản lý
+                            clean_name = os.path.basename(img_path).replace('.jpg', '')
+                            save_path = f'vis_results_baseline/hcast_evolution_{clean_name}.png'
+                            
+                            save_hcast_all_levels_attention(model, single_img_tensor, single_mask_tensor, original_img, save_path)
+                            print(f"Saved visualization to: {save_path}")
+                            found = True
+                            break # Tìm thấy rồi thì dừng vòng lặp
+                            
+                if not found:
+                    print(f"ERROR: Could not find any image matching '{args.vis_name}'. Please check the filename.")
+            
+            # TRƯỜNG HỢP 2: LẤY 10 ẢNH 
+            else:
+                data_iter = iter(data_loader_val)
+                for i in range(10):
+                    try:
+                        batch_data = next(data_iter)
+                        single_img_tensor = batch_data[0][0:1].to(device)
+                        single_mask_tensor = batch_data[1][0:1].to(device)
+                        original_img = unnormalize_image(single_img_tensor[0])
+                        
+                        save_path = f'vis_results_baseline/hcast_evolution_random_{i}.png'
+                        save_hcast_all_levels_attention(model, single_img_tensor, single_mask_tensor, original_img, save_path)
+                    except StopIteration:
+                        break
+                print("=> Saved 10 random visualizations.")
+        return 
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
