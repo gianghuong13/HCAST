@@ -261,7 +261,7 @@ def get_args_parser():
     parser.add_argument('--random_seed', default=1, type=int)
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training')
     parser.add_argument('--visualize', action='store_true', help='Export attention maps after evaluation')
-    parser.add_argument('--vis-name', type=str, default='', help='Tên file ảnh cụ thể muốn vẽ (VD: Loggerhead_Shrike_001.jpg)')
+    parser.add_argument('--vis_name', type=str, default='', help='Tên file ảnh cụ thể muốn vẽ (VD: Loggerhead_Shrike_001.jpg)')
     return parser
 
 
