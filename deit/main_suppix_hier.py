@@ -115,13 +115,18 @@ def save_hcast_all_levels_attention(hcast_model, image_tensor, y_mask_tensor, or
                 heatmap[y_mask == seg_id] = float(weights[i])
                 
         heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
-        faded_img = cv2.addWeighted(original_img, 0.4, np.full_like(original_img, 255), 0.6, 0)
+        
+        white_base = np.full_like(original_img, 255)
+        faded_img = cv2.addWeighted(original_img, 0.2, white_base, 0.8, 0) # Nền rất trắng
+        
         red_mask = np.zeros_like(original_img, dtype=np.uint8)
-        red_mask[:] = [139, 0, 0] 
+        red_mask[:] = [139, 0, 0]
+        
         heatmap_expanded = np.expand_dims(heatmap, axis=-1)
+        
         blended = (heatmap_expanded * red_mask + (1 - heatmap_expanded) * faded_img).astype(np.uint8)
-        return cv2.addWeighted(original_img, 0.5, blended, 0.5, 0)
-
+        
+        return blended
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
     axes[0].imshow(original_img); axes[0].set_title("Image", fontsize=14); axes[0].axis('off')
     titles = ["Level 2", "Level 3", "Level 4"]
